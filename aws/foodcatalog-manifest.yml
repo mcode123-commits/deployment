@@ -1,0 +1,87 @@
+apiVersion: apps/v1                          # API version for workload resources; apps/v1 is used for Deployments
+kind: Deployment                             # We are defining a Deployment (manages ReplicaSets and Pods)
+metadata:
+  name: foodcatalogapp                       # Name of this Deployment object (used by kubectl and in events/logs)
+  labels:                                    # Labels attached to the Deployment itself (for grouping, filtering, etc.)
+    app: foodcatalogapp                      # Logical tag "app=foodcatalogapp"; also reused by pods & Services
+
+spec:                                        # Desired state of the Deployment
+  replicas: 1                                # Ask Kubernetes to keep exactly 1 pod of this app running
+  selector:                                  # How the Deployment knows which pods belong to it
+    matchLabels:                             # It will manage pods that have ALL of these labels
+      app: foodcatalogapp                    # Must match the labels in the pod template below (critical to be identical)
+  template:                                  # Pod template: blueprint for creating pods managed by this Deployment
+    metadata:
+      labels:
+        app: foodcatalogapp                  # Each created pod gets this label; used by:
+                                             # - Deployment (via selector)
+                                             # - Service (via selector) to route traffic correctly
+    spec:                                    # Specification for the pod itself
+      containers:                            # List of containers in this pod (usually one per microservice)
+        - name: foodcatalogapp               # Name of the container inside the pod (handy for logs, probes, etc.)
+          image: mankusmichal/foodcatalogapp:latest  # Docker image to run, pulled from a registry (e.g. Docker Hub)
+          imagePullPolicy: Always            # Always pull the image when the pod starts (ensures latest ":latest" version)
+          ports:
+            - containerPort: 9092            # The application inside the container listens on port 9092
+                                             # This is used for:
+                                             # - Documentation
+                                             # - Service targetPort mapping
+                                             # - Probes (if you add liveness/readiness later)
+
+          env:                               # Environment variables to inject into the container at startup
+                                             # These values configure DB access for the Spring Boot app
+            - name: SPRING_DATASOURCE_USERNAME   # Env var name expected by Spring (DB username)
+              valueFrom:                     # Instead of hardcoding, we fetch the value from a Kubernetes Secret
+                secretKeyRef:
+                  name: secret               # Name of the Secret object (must exist in the same namespace)
+                  key: mysql-username        # Key inside the Secret's data; its value becomes SPRING_DATASOURCE_USERNAME
+
+            - name: SPRING_DATASOURCE_PASSWORD   # Env var for DB password
+              valueFrom:
+                secretKeyRef:
+                  name: secret               # Same Secret object used for credentials
+                  key: mysql-password        # Key inside the Secret that holds the password value
+
+            - name: SPRING_DATASOURCE_URL        # Env var for the JDBC/database URL (where the DB lives)
+              valueFrom:
+                configMapKeyRef:             # This time we pull from a ConfigMap (non-secret configuration)
+                  name: configmap            # Name of the ConfigMap object
+                  key: foodcatalog_db_url    # Key inside ConfigMap's data; value should be the DB URL for this service
+
+          # Summary of the pod/container:
+          # - Runs image "mankusmichal/foodcatalogapp:latest"
+          # - Listens on port 9092
+          # - Reads DB URL from ConfigMap
+          # - Reads DB username/password from Secret
+          # - Is labeled app=foodcatalogapp so it can be managed & reached via Deployment and Service
+
+---
+
+apiVersion: v1                               # Core API group; Services live under v1
+kind: Service                                # We are defining a Service (stable network endpoint for pods)
+metadata:
+  name: foodcatalogapp-service               # Name of the Service; used in DNS inside the cluster:
+                                             # e.g. foodcatalogapp-service.default.svc.cluster.local
+
+spec:
+  ports:
+    - protocol: TCP                          # Transport protocol for this Service port (HTTP typically rides on TCP)
+      port: 9092                             # Port that clients inside the cluster will use to access this Service
+      targetPort: 9092                       # Port on the target pods’ containers to forward traffic to
+                                             # (should match containerPort above)
+
+  selector:                                  # Which pods should this Service send traffic to?
+    app: foodcatalogapp                      # Any pod with label "app=foodcatalogapp" becomes a backend for this Service
+
+  # How it all fits together:
+  # - Deployment creates pods with label app=foodcatalogapp, running the foodcatalog app on port 9092.
+  # - This Service selects pods with app=foodcatalogapp via the selector.
+  # - Inside the cluster, other services/pods can reach this app by calling:
+  #       http://foodcatalogapp-service:9092/...
+  #   without knowing or caring about individual pod IPs.
+  # - If the pod dies and is recreated, the Service still points to the new pod automatically,
+  #   because it matches the same label.
+  # - Configuration is externalized:
+  #   - DB URL is in ConfigMap (configmap.foodcatalog_db_url)
+  #   - DB credentials are in Secret (secret.mysql-username/mysql-password)
+  #   This means you can change DB config without rebuilding the Docker image.
