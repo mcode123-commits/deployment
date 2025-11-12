@@ -1,0 +1,74 @@
+apiVersion: apps/v1                    # API version for "apps" resources; apps/v1 is the standard for Deployments
+kind: Deployment                       # We are creating a Deployment (a controller that manages replicas of pods)
+
+metadata:                              # Metadata about this Deployment (name, labels, etc.)
+  name: restaurantapp                  # Name of the Deployment; used in kubectl and events/logs
+  labels:                              # Labels attached to the Deployment object itself
+    app: restaurantapp                 # Logical tag: "app=restaurantapp" (helps group related resources)
+
+spec:                                  # Desired state of the Deployment
+  replicas: 1                          # Ask Kubernetes to keep 1 pod (replica) of this app running at all times
+  selector:                            # How the Deployment finds which pods it owns
+    matchLabels:                       # All pods with these labels are considered part of this Deployment
+      app: restaurantapp               # Must match the labels defined in the pod template below
+  template:                            # "Pod template": blueprint used to create pods managed by this Deployment
+    metadata:                          # Metadata for *pods* (not the Deployment)
+      labels:                          # Labels applied to each pod created from this template
+        app: restaurantapp             # This label is what the Deployment selector and Service selector look for
+    spec:                              # Specification of what runs inside the pod
+      containers:                      # List of containers in this pod (usually 1 per pod in microservices)
+        - name: restaurantapp          # Name of this container inside the pod (for logs, metrics, etc.)
+          image: mankusmichal/restaurant-catalog:latest  # Docker image to run; pulled from a registry (e.g. Docker Hub)
+          imagePullPolicy: Always      # Always pull the image when a pod is started (ensures latest :latest image)
+          ports:                       # Ports exposed by the container (for other components / Service to target)
+            - containerPort: 9091      # The app inside the container listens on port 9091
+          env:                         # Environment variables injected into the container at startup
+            # IMPORTANT: these names must match what the Spring Boot app expects
+            - name: SPRING_DATASOURCE_USERNAME  # Env var name (likely should be SPRING_DATASOURCE_USERNAME)
+              valueFrom:               # Value is not hardcoded here; it is read from a Kubernetes Secret
+                secretKeyRef:          # Pull the value from a specific key inside a Secret
+                  name: secret         # Name of the Secret object (must exist in the same namespace)
+                  key: mysql-username  # Key in the Secret's data; its value becomes the env var value
+            - name: SPRING_DATASOURCE_PASSWORD    # Env var for DB password
+              valueFrom:
+                secretKeyRef:          # Again, coming from the Secret
+                  name: secret         # Same Secret object
+                  key: mysql-password  # Different key: the stored password value
+            - name: SPRING_DATASOURCE_URL         # Env var for the JDBC/database URL
+              valueFrom:
+                configMapKeyRef:       # This time we pull the value from a ConfigMap (non-secret config)
+                  name: configmap      # Name of the ConfigMap object (must exist in the same namespace)
+                  key: restaurantcatalog_db_url # Key in ConfigMap's data; value should be the DB URL for this service
+
+# At this point:
+# - The Deployment ensures 1 pod is running.
+# - Each pod runs the "restaurant-catalog" image on port 9091.
+# - DB credentials (user/pass) come from a Secret.
+# - DB URL comes from a ConfigMap.
+# - The pod is labeled "app=restaurantapp", which both Deployment and Service will use.
+
+---
+apiVersion: v1                         # Core v1 API; Services live here
+kind: Service                          # We are creating a Service (stable access point for pods)
+
+metadata:
+  name: restaurant-service             # Name of the Service; also part of its DNS name inside the cluster
+                                       # e.g. restaurant-service.default.svc.cluster.local
+
+spec:                                  # How this Service behaves / routes traffic
+  ports:                               # List of ports exposed by this Service
+    - protocol: TCP                    # Use TCP (most HTTP/DB-type traffic uses TCP)
+      port: 9091                       # Port clients inside the cluster will use to talk to this Service
+      targetPort: 9091                 # Port on the *pod's container* where traffic is forwarded (matches containerPort)
+  selector:                            # Which pods should this Service send traffic to?
+    app: restaurantapp                 # Any pod with label "app=restaurantapp" is part of this Service's endpoints
+
+# Putting it all together:
+# - The Deployment creates pods with label "app=restaurantapp".
+# - The Service selects pods with label "app=restaurantapp".
+# - That means "restaurant-service" is a stable, DNS-resolvable name that load-balances across all matching pods.
+# - Inside the cluster, other services/pods can call:
+#       http://restaurant-service:9091/...
+#   without caring about individual pod IPs or restarts.
+# - When you change the image or env vars in the Deployment and re-apply:
+#   Kubernetes will roll out new pods (rolling update) behind the same Service name.
