@@ -1,0 +1,78 @@
+apiVersion: apps/v1                          # API version for workload controllers like Deployments
+kind: Deployment                             # We are defining a Deployment (manages replicas of pods)
+
+metadata:
+  name: userapp                              # Name of this Deployment object
+  labels:
+    app: userapp                             # Label on the Deployment (also used on pods/services to group things)
+
+spec:                                        # Desired state of the Deployment
+  replicas: 1                                # Keep exactly 1 pod (replica) of this app running
+  selector:                                  # How this Deployment knows which pods belong to it
+    matchLabels:
+      app: userapp                           # It will manage pods that have label app=userapp
+                                             # (must match the labels in the pod template below)
+
+  template:                                  # Pod template: blueprint for pods created by this Deployment
+    metadata:
+      labels:
+        app: userapp                         # Every pod created will have label app=userapp
+                                             # - Deployment uses this to track its pods
+                                             # - Service uses this to route traffic to the right pods
+    spec:
+      containers:                            # List of containers in the pod (here: single microservice)
+        - name: userapp                      # Name of the container inside the pod
+          image: mankusmichal/userdata:latest  # Docker image to run (pulled from registry)
+          imagePullPolicy: Always            # Always pull the image when a pod starts (useful with :latest tag)
+          ports:
+            - containerPort: 9093            # The app inside the container listens on port 9093
+
+          env:                               # Environment variables injected into the container
+            - name: SPRING_DATASOURCE_USERNAME   # DB username for Spring Boot
+              valueFrom:
+                secretKeyRef:                # Read the value from a Kubernetes Secret
+                  name: secret               # Name of the Secret object
+                  key: mysql-username        # Key in the Secret's data; its value becomes the env var
+
+            - name: SPRING_DATASOURCE_PASSWORD   # DB password for Spring Boot
+              valueFrom:
+                secretKeyRef:
+                  name: secret               # Same Secret object as above
+                  key: mysql-password        # Key holding the password value
+
+            - name: SPRING_DATASOURCE_URL        # JDBC URL for the user database
+              valueFrom:
+                configMapKeyRef:             # Read the value from a ConfigMap (non-secret config)
+                  name: configmap            # Name of the ConfigMap object
+                  key: userdata_db_url       # Key in ConfigMap.data; its value is the DB URL for user service
+
+# Summary so far:
+# - Deployment "userapp" ensures 1 pod runs.
+# - Pod runs image mankusmichal/userdata:latest on port 9093.
+# - DB URL comes from ConfigMap (user_db_url).
+# - DB username/password come from Secret (mysql-username / mysql-password).
+# - Pod is labeled app=userapp, so other resources can target it.
+
+---
+apiVersion: v1                               # Core API version for Services
+kind: Service                                # We are defining a Service (stable network endpoint for pods)
+
+metadata:
+  name: user-service                         # Name of the Service (also used in DNS inside the cluster)
+
+spec:
+  ports:
+    - protocol: TCP                          # Transport protocol; HTTP/TCP traffic
+      port: 9093                             # Port that other pods/services use to reach "user-service"
+      targetPort: 9093                       # Port on the userapp pods' containers that receives the traffic
+
+  selector:
+    app: userapp                             # Service sends traffic to pods with label app=userapp
+                                             # -> i.e. the pods created by the Deployment above
+
+# Putting it together:
+# - Deployment creates pods labeled app=userapp.
+# - Service "user-service" selects pods with app=userapp and exposes them on port 9093.
+# - Inside the cluster, other services can call:
+#       http://user-service:9093/...
+#   without knowing pod IPs; if the pod restarts, the Service still points to the new pod automatically.
