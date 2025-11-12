@@ -1,0 +1,69 @@
+apiVersion: apps/v1                          # Use the "apps/v1" API group – standard for Deployments
+kind: Deployment                             # This manifest defines a Deployment (manages pods and ReplicaSets)
+
+metadata:
+  name: orderapp                             # Name of the Deployment (used in kubectl, logs, events)
+
+spec:                                        # Desired state of the Deployment
+  replicas: 1                                # Run exactly 1 replica (pod) of this application
+  selector:                                  # How this Deployment finds the pods it owns
+    matchLabels:
+      app: orderapp                          # It will manage pods that have label app=orderapp
+
+  template:                                  # Pod template – blueprint for pods created by this Deployment
+    metadata:
+      labels:
+        app: orderapp                        # Every created pod gets label app=orderapp
+                                             # This ties together:
+                                             # - Deployment (selector)
+                                             # - Service (selector) below
+
+    spec:
+      containers:                            # List of containers in each pod (here: single container)
+        - name: orderapp                     # Name of the container inside the pod
+          image: mankusmichal/order:latest   # Docker image to run (pulled from your Docker Hub repo)
+          imagePullPolicy: Always            # Always pull the image when starting the pod (useful with :latest tag)
+          ports:
+            - containerPort: 9094            # The application listens on port 9094 inside the container
+
+          env:                               # Environment variables injected into the container
+            - name: JAVA_TOOL_OPTIONS        # JVM options environment variable
+              value: "-Djdk.tls.client.protocols=TLSv1.2"
+                                             # Forces the JVM to use TLSv1.2 for outbound SSL/TLS connections
+                                             # Needed so the app can successfully perform SSL handshake with MongoDB Atlas
+
+            - name: SPRING_DATA_MONGODB_URI  # Spring Boot config: full MongoDB connection URI
+              valueFrom:
+                configMapKeyRef:             # Get the value from a ConfigMap (non-secret configuration)
+                  name: configmap            # Name of the ConfigMap object
+                  key: order_db_url          # Key inside ConfigMap.data – must match the key you defined there
+                                             # Example value in ConfigMap:
+                                             #   order_db_url: "mongodb+srv://admin:admin@.../orderdb?..."
+
+            - name: SPRING_DATA_MONGODB_DATABASE # Spring Boot config: name of the MongoDB database to use
+              value: "orderdb"               # Must match the DB name part in your Mongo URI / your Atlas database
+
+---
+apiVersion: v1                               # Core API group v1 – this is where Service is defined
+kind: Service                                # This manifest defines a Service (stable network endpoint for pods)
+
+metadata:
+  name: order-service                        # Name of the Service (used in DNS inside the cluster)
+
+spec:
+  selector:
+    app: orderapp                            # Service routes traffic to pods with label app=orderapp
+                                             # -> matches pods created by the Deployment above
+
+  ports:
+    - protocol: TCP                          # Use TCP for this Service port (HTTP/TCP traffic)
+      port: 9094                             # Port that other pods/services will use to reach "order-service"
+      targetPort: 9094                       # Port on the orderapp containers where traffic is forwarded
+
+# How it all fits together:
+# - The Deployment "orderapp" creates a pod running the "mankusmichal/order:latest" image on port 9094.
+# - The pod gets its MongoDB URI from the ConfigMap (order_db_url) and DB name "orderdb" via env vars.
+# - JAVA_TOOL_OPTIONS ensures TLSv1.2 so the app can talk to MongoDB Atlas over HTTPS/TLS.
+# - The pod is labeled app=orderapp.
+# - The Service "order-service" selects pods with app=orderapp and exposes them on port 9094.
+# - Inside the cluster, other services can call: http://order-service:9094/ without knowing pod IPs.
