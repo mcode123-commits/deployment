@@ -1,0 +1,79 @@
+apiVersion: apps/v1                          # API version for workload controllers like StatefulSet/Deployment
+kind: StatefulSet                            # We are defining a StatefulSet (for stateful apps needing stable identity)
+
+metadata:
+  name: eureka                               # Name of this StatefulSet (will prefix pod names, e.g. eureka-0)
+
+spec:
+  serviceName: eureka-service                # Name of a *headless* service used for stable DNS of pods in this set
+                                             # Pods get DNS like: eureka-0.eureka-service.<ns>.svc.cluster.local
+  replicas: 1                                # Number of pods to run; here only one Eureka instance (eureka-0)
+  selector:                                  # How the StatefulSet finds the pods that belong to it
+    matchLabels:
+      app: eureka                            # It manages pods with label app=eureka (must match template below)
+
+  template:                                  # Pod template: blueprint for creating each StatefulSet pod
+    metadata:
+      labels:
+        app: eureka                          # Each pod created will have label app=eureka
+                                             # This is also what the Service selector will use to route traffic
+
+    spec:
+      containers:                            # List of containers in each pod (here: single Eureka server)
+        - name: eureka                       # Name of the container inside the pod
+          image: mankusmichal/eureka-server:latest  # Docker image for Eureka server
+          imagePullPolicy: Always            # Always pull the image when starting the pod
+          ports:
+            - containerPort: 8761            # Eureka server listens on port 8761 inside the container
+
+          env:                               # Environment variables for the Eureka container
+            - name: EUREKA_SERVER_ADDRESS    # Env var that the Eureka app reads for its own service URL
+              valueFrom:
+                configMapKeyRef:             # Value comes from a key in a ConfigMap
+                  name: configmap            # Name of the ConfigMap object
+                  key: eureka_service_address  # Key in ConfigMap; value is something like:
+                                             # "http://eureka-0.eureka-service:8761/eureka"
+                                             # This gives Eureka a stable address to register with / advertise
+
+# Summary up to here:
+# - StatefulSet "eureka" ensures 1 pod runs, named eureka-0.
+# - Because it's a StatefulSet with serviceName=eureka-service,
+#   the pod has stable DNS: eureka-0.eureka-service.svc....
+# - The ConfigMap supplies that same URL to the app via EUREKA_SERVER_ADDRESS.
+# - Even if the pod restarts, it comes back as eureka-0 and keeps the same identity.
+
+---
+apiVersion: v1                               # Core API version for Services
+kind: Service                                # We are defining a Service for Eureka
+
+metadata:
+  name: eureka-service                       # Name of the Service; used in DNS and in StatefulSet.serviceName
+  labels:
+    app: eureka-service                      # Label for the Service itself (for humans / tooling, not routing)
+
+spec:
+  clusterIP: None                            # Make this a *headless* Service:
+                                             # - Kubernetes does NOT allocate a single virtual ClusterIP
+                                             # - Instead, each pod in the StatefulSet gets its own DNS entry:
+                                             #   eureka-0.eureka-service, eureka-1.eureka-service, etc.
+                                             #   This is what makes addresses like "eureka-0.eureka-service:8761"
+                                             #   work and is essential for StatefulSet stable per-pod DNS.
+  ports:
+    - protocol: TCP                          # Use TCP for Eureka HTTP traffic
+      port: 8761                             # Port exposed by the Service inside the cluster
+      targetPort: 8761                       # Port on the Eureka pods' containers to forward traffic to
+
+  selector:
+    app: eureka                              # This Service sends traffic to pods labeled app=eureka
+                                             # => the pods created by the StatefulSet template above
+
+# How it all fits together:
+# - StatefulSet "eureka" creates pod(s) named eureka-0, eureka-1, ... (here only eureka-0),
+#   each labeled app=eureka.
+# - Headless Service "eureka-service" (clusterIP: None) gives each pod its own DNS name:
+#       eureka-0.eureka-service:8761
+# - The ConfigMap value "eureka_service_address" is that same URL, injected into the container as
+#   EUREKA_SERVER_ADDRESS, so Spring/Eureka can use a consistent self address.
+# - Other services in the cluster can talk to Eureka simply via:
+#       http://eureka-service:8761/...
+#   while individual backend apps that need the specific node might use eureka-0.eureka-service:8761.
