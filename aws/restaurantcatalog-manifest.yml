@@ -52,8 +52,8 @@ apiVersion: v1                         # Core v1 API; Services live here
 kind: Service                          # We are creating a Service (stable access point for pods)
 
 metadata:
-  name: restaurant-service             # Name of the Service; also part of its DNS name inside the cluster
-                                       # e.g. restaurant-service.default.svc.cluster.local
+  name: restaurant-catalog-service             # Name of the Service; also part of its DNS name inside the cluster
+                                       # e.g. restaurantcatalog-service.default.svc.cluster.local
 
 spec:                                  # How this Service behaves / routes traffic
   ports:                               # List of ports exposed by this Service
@@ -66,9 +66,9 @@ spec:                                  # How this Service behaves / routes traff
 # Putting it all together:
 # - The Deployment creates pods with label "app=restaurantapp".
 # - The Service selects pods with label "app=restaurantapp".
-# - That means "restaurant-service" is a stable, DNS-resolvable name that load-balances across all matching pods.
+# - That means "restaurantcatalog-service" is a stable, DNS-resolvable name that load-balances across all matching pods.
 # - Inside the cluster, other services/pods can call:
-#       http://restaurant-service:9091/...
+#       http://restaurantcatalog-service:9091/...
 #   without caring about individual pod IPs or restarts.
 # - When you change the image or env vars in the Deployment and re-apply:
 #   Kubernetes will roll out new pods (rolling update) behind the same Service name.

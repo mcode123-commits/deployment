@@ -19,7 +19,7 @@ spec:                                        # Desired state of the Deployment
     spec:                                    # Specification for the pod itself
       containers:                            # List of containers in this pod (usually one per microservice)
         - name: foodcatalogapp               # Name of the container inside the pod (handy for logs, probes, etc.)
-          image: mankusmichal/foodcatalogapp:latest  # Docker image to run, pulled from a registry (e.g. Docker Hub)
+          image: mankusmichal/foodcatalog:latest  # Docker image to run, pulled from a registry (e.g. Docker Hub)
           imagePullPolicy: Always            # Always pull the image when the pod starts (ensures latest ":latest" version)
           ports:
             - containerPort: 9092            # The application inside the container listens on port 9092
@@ -60,8 +60,8 @@ spec:                                        # Desired state of the Deployment
 apiVersion: v1                               # Core API group; Services live under v1
 kind: Service                                # We are defining a Service (stable network endpoint for pods)
 metadata:
-  name: foodcatalogapp-service               # Name of the Service; used in DNS inside the cluster:
-                                             # e.g. foodcatalogapp-service.default.svc.cluster.local
+  name: food-service                         # Name of the Service; used in DNS inside the cluster:
+                                             # e.g. food-service.default.svc.cluster.local
 
 spec:
   ports:
@@ -77,7 +77,7 @@ spec:
   # - Deployment creates pods with label app=foodcatalogapp, running the foodcatalog app on port 9092.
   # - This Service selects pods with app=foodcatalogapp via the selector.
   # - Inside the cluster, other services/pods can reach this app by calling:
-  #       http://foodcatalogapp-service:9092/...
+  #       http://food-service:9092/...
   #   without knowing or caring about individual pod IPs.
   # - If the pod dies and is recreated, the Service still points to the new pod automatically,
   #   because it matches the same label.
