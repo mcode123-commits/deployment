@@ -18,7 +18,7 @@ spec:                                  # Desired state of the Deployment
     spec:                              # Specification of what runs inside the pod
       containers:                      # List of containers in this pod (usually 1 per pod in microservices)
         - name: restaurantapp          # Name of this container inside the pod (for logs, metrics, etc.)
-          image: mankusmichal/restaurant-catalog:28
+          image: mankusmichal/restaurant-catalog:29
           imagePullPolicy: Always      # Always pull the image when a pod is started (ensures latest :latest image)
           ports:                       # Ports exposed by the container (for other components / Service to target)
             - containerPort: 9091      # The app inside the container listens on port 9091
